@@ -53,7 +53,7 @@ export function Campo({
     <label className="block text-sm">
       <span className="text-suave">
         {label}
-        {mostrar === '' && tipo !== 'texto' && tipo !== 'mes' && <Etiqueta color="bg-amber-100 text-amber-900">por confirmar</Etiqueta>}
+        {mostrar === '' && (tipo === 'pesos' || tipo === 'numero' || tipo === 'porcentaje') && <Etiqueta color="bg-amber-100 text-amber-900">por confirmar</Etiqueta>}
       </span>
       <input
         key={mostrar}
@@ -70,3 +70,17 @@ export function Campo({
     </label>
   )
 }
+
+/** Sección plegable: el título y un resumen a la derecha; el detalle solo al tocar. */
+export const Seccion = ({ titulo, resumen, children }: { titulo: ReactNode; resumen?: ReactNode; children: ReactNode }) => (
+  <details className="group mt-3 rounded-2xl border border-linea bg-papel">
+    <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden">
+      <span className="font-semibold">{titulo}</span>
+      <span className="flex items-center gap-2 text-sm tabular-nums text-suave">
+        {resumen}
+        <span aria-hidden className="transition-transform group-open:rotate-90">›</span>
+      </span>
+    </summary>
+    <div className="px-4 pb-4">{children}</div>
+  </details>
+)

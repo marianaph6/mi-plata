@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { db, hoy, useDatos, type Deuda, type Movimiento } from '../db'
 import { PAGO_TARJETA, cop, estadoDeuda, fechaCorta, leerValor, mesCorto, saldoTarjeta, simular } from '../lib/plata'
-import { Campo, Etiqueta, Fila, Tarjeta, botonSecundario, entrada } from '../ui'
+import { Campo, Fila, Tarjeta, botonSecundario, entrada } from '../ui'
 
 function Simulador({ dd, e }: { dd: Deuda; e: ReturnType<typeof estadoDeuda> }) {
   const [texto, setTexto] = useState('')
@@ -14,11 +14,10 @@ function Simulador({ dd, e }: { dd: Deuda; e: ReturnType<typeof estadoDeuda> }) 
     setTexto('')
   }
   return (
-    <div className="mt-3 rounded-xl bg-fondo p-3">
-      <p className="text-sm font-semibold">Simular un abono extra</p>
-      <p className="text-xs text-suave">{dd.modoAbono === 'plazo' ? 'Aquí un abono reduce el plazo: misma cuota, terminas antes.' : 'Aquí un abono reduce la cuota: mismo plazo, pagas menos cada mes.'}</p>
+    <div>
+      <p className="text-xs text-suave">{dd.modoAbono === 'plazo' ? 'Un abono aquí reduce el plazo.' : 'Un abono aquí reduce la cuota.'}</p>
       <input inputMode="numeric" placeholder="$ valor del abono" aria-label="Valor del abono" value={abono ? cop(abono) : ''} onChange={(ev) => setTexto(ev.target.value)} className={`mt-2 ${entrada}`} />
-      {abono > 0 && !s && <p className="mt-2 text-sm text-amber-900">Para simular, completa el saldo{dd.modoAbono === 'cuota' ? ', las cuotas restantes' : ''} y la tasa abajo.</p>}
+      {abono > 0 && !s && <p className="mt-2 text-sm text-amber-900">Para simular, completa saldo y tasa en Editar datos.</p>}
       {s?.modo === 'plazo' && (
         <div className="mt-2 text-sm">
           <Fila izq="Cuotas que faltan" der={`${s.cuotasAntes} → ${s.cuotasDespues}`} />
@@ -55,21 +54,12 @@ function TarjetaNubank({ t, movs, cambiar }: { t: Deuda; movs: Movimiento[]; cam
   }
   return (
     <Tarjeta>
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <h2 className="font-semibold">{t.nombre}</h2>
-          <p className="text-sm text-suave">{t.entidad} · corte el {t.dia}</p>
-        </div>
-        <Etiqueta>abonos: #{t.prioridad}</Etiqueta>
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="font-semibold">{t.nombre}</h2>
+        <span className={`text-xl font-bold tabular-nums ${saldo > 0 ? 'text-red-700' : ''}`}>{cop(saldo)}</span>
       </div>
-      <p className="mt-3 text-xs text-suave">Debes</p>
-      <p className={`text-3xl font-bold tabular-nums ${saldo > 0 ? 'text-red-700' : ''}`}>{cop(saldo)}</p>
-      <label className="mt-3 flex items-start gap-2 text-sm">
-        <input type="checkbox" className="mt-0.5 size-5" checked={!!t.tarjeta?.acumula} onChange={(e) => cambiar({ tarjeta: { pagoFecha: t.tarjeta?.pagoFecha ?? null, acumula: e.target.checked } })} />
-        <span>Los cargos nuevos se acumulan aquí y salen de la cuenta solo cuando pagues la tarjeta.</span>
-      </label>
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <Campo label="Fecha en que la pagas" tipo="fecha" valor={t.tarjeta?.pagoFecha} onGuardar={(v) => cambiar({ tarjeta: { acumula: !!t.tarjeta?.acumula, pagoFecha: (v as string) || null } })} />
+      <div className="mt-2 grid grid-cols-2 gap-3">
+        <Campo label="La pago el" tipo="fecha" valor={t.tarjeta?.pagoFecha} onGuardar={(v) => cambiar({ tarjeta: { acumula: !!t.tarjeta?.acumula, pagoFecha: (v as string) || null } })} />
       </div>
       {saldo > 0 && (
         <div className="mt-3 flex gap-2">
@@ -77,24 +67,24 @@ function TarjetaNubank({ t, movs, cambiar }: { t: Deuda; movs: Movimiento[]; cam
           <button type="button" onClick={pagarTarjeta} className={`shrink-0 ${botonSecundario}`}>Pagué</button>
         </div>
       )}
-      {t.notas && <p className="mt-2 text-sm text-suave">{t.notas}</p>}
-      <details className="mt-3">
-        <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">Pagos a la tarjeta</summary>
-        {pagos.length ? (
-          <ul className="text-sm">
-            {[...pagos].reverse().map((m) => (
-              <li key={m.id} className="flex justify-between py-0.5"><span>{fechaCorta(m.fecha)}</span><span className="tabular-nums">{cop(m.valor)}</span></li>
-            ))}
-          </ul>
-        ) : <p className="text-sm text-suave">Aún no hay pagos.</p>}
-      </details>
-      <details>
-        <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">Corregir saldo</summary>
-        <div className="grid grid-cols-2 gap-3">
-          <Campo label="Saldo (extracto o app)" valor={t.saldo} onGuardar={(v) => cambiar({ saldo: v as number | null })} />
+      <details className="mt-2">
+        <summary className="min-h-11 cursor-pointer py-2 text-sm text-suave">Ajustes e historial</summary>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-0.5 size-5" checked={!!t.tarjeta?.acumula} onChange={(e) => cambiar({ tarjeta: { pagoFecha: t.tarjeta?.pagoFecha ?? null, acumula: e.target.checked } })} />
+          <span>Los cargos nuevos se suman aquí y salen de la cuenta cuando pagues la tarjeta.</span>
+        </label>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <Campo label="Saldo real" valor={t.saldo} onGuardar={(v) => cambiar({ saldo: v as number | null })} />
           <Campo label="Al final del día" tipo="fecha" valor={t.saldoFecha} onGuardar={(v) => v && cambiar({ saldoFecha: v as string })} />
         </div>
-        <p className="mt-2 text-xs text-suave">Los cargos y pagos que registres después de ese día se suman o restan solos.</p>
+        {pagos.length > 0 && (
+          <ul className="mt-3 text-sm">
+            {[...pagos].reverse().map((m) => (
+              <li key={m.id} className="flex justify-between py-0.5"><span>Pago {fechaCorta(m.fecha)}</span><span className="tabular-nums">{cop(m.valor)}</span></li>
+            ))}
+          </ul>
+        )}
+        {t.notas && <p className="mt-2 text-xs text-suave">{t.notas}</p>}
       </details>
     </Tarjeta>
   )
@@ -113,7 +103,7 @@ const historial = (ms: Movimiento[]) =>
       ))}
     </ul>
   ) : (
-    <p className="mt-1 text-sm text-suave">Aún no hay pagos registrados. Las cuotas se marcan en Pagos.</p>
+    <p className="text-sm text-suave">Aún no hay pagos. Las cuotas se marcan en Pagos.</p>
   )
 
 export function Deudas() {
@@ -130,7 +120,7 @@ export function Deudas() {
   return (
     <>
       <h1 className="text-3xl font-bold tracking-tight">Deudas</h1>
-      <p className="mt-1 text-suave">Cuotas al mes: {cop(deudas.reduce((t, x) => t + x.cuota, 0))}</p>
+      <p className="mt-1 text-sm text-suave">Cuotas al mes: {cop(deudas.reduce((t, x) => t + x.cuota, 0))}</p>
       {!deudas.length && <Tarjeta><p className="text-sm text-suave">No hay deudas registradas. Se cargan con tu archivo de datos (Más → Restaurar).</p></Tarjeta>}
 
       {deudas.map((dd) => {
@@ -138,39 +128,34 @@ export function Deudas() {
         const e = estadoDeuda(dd, d.movs, f)
         return (
           <Tarjeta key={dd.id}>
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <h2 className="font-semibold">{dd.nombre}</h2>
-                <p className="text-sm text-suave">{dd.entidad} · día {dd.dia}</p>
-              </div>
-              <Etiqueta>abonos: #{dd.prioridad}</Etiqueta>
+            <div className="flex items-baseline justify-between gap-2">
+              <h2 className="font-semibold">{dd.nombre}</h2>
+              <span className="tabular-nums text-suave">{cop(dd.cuota)}</span>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <Dato titulo="Cuota" valor={cop(dd.cuota)} nota={e.cuotaNueva && Math.abs(e.cuotaNueva - dd.cuota) > 500 ? `nueva ≈ ${cop(e.cuotaNueva)}` : undefined} />
-              <Dato titulo="Saldo" valor={e.saldo == null ? null : `${e.i != null && e.movs.length ? '≈' : ''}${cop(e.saldo)}`} />
-              <Dato titulo="Cuotas restantes" valor={e.restantes == null ? null : isFinite(e.restantes) ? String(e.restantes) : '∞'} nota={`${e.cuotasPagadas} pagadas aquí`} />
-              <Dato titulo="Última cuota" valor={e.ultima ? `≈ ${mesCorto(e.ultima)}` : null} />
-            </div>
-            <p className={`mt-3 text-sm ${e.cuotaDelMes ? 'text-emerald-800' : 'text-amber-900'}`}>{e.cuotaDelMes ? '✓ Cuota de este mes al día' : `Cuota de este mes pendiente (día ${dd.dia})`}</p>
-            {dd.notas && <p className="mt-1 text-sm text-suave">{dd.notas}</p>}
+            <p className="mt-1 text-sm text-suave">
+              {e.saldo != null && <>Saldo {e.i != null && e.movs.length ? '≈' : ''}{cop(e.saldo)} · </>}
+              {e.restantes != null && isFinite(e.restantes) ? `${e.restantes} cuotas` : 'cuotas por confirmar'}
+              {e.ultima && <> · hasta {mesCorto(e.ultima)}</>}
+            </p>
+            <p className={`mt-1 text-sm ${e.cuotaDelMes ? 'text-emerald-800' : 'text-amber-900'}`}>{e.cuotaDelMes ? '✓ Al día este mes' : `Pendiente: día ${dd.dia}`}</p>
             {dd.enlace && <a href={dd.enlace} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm font-semibold text-acento">Ir a pagar ↗</a>}
+            {e.cuotaNueva && Math.abs(e.cuotaNueva - dd.cuota) > 500 && <p className="mt-1 text-sm">Cuota nueva ≈ {cop(e.cuotaNueva)}</p>}
 
-            <Simulador dd={dd} e={e} />
-
-            <details className="mt-3">
-              <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">Historial</summary>
-              {historial(e.movs)}
+            <details className="mt-2">
+              <summary className="min-h-11 cursor-pointer py-2 text-sm text-suave">Simular abono</summary>
+              <Simulador dd={dd} e={e} />
             </details>
             <details>
-              <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">Editar datos</summary>
-              <div className="grid grid-cols-2 gap-3">
+              <summary className="min-h-11 cursor-pointer py-2 text-sm text-suave">Historial y datos</summary>
+              {historial(e.movs)}
+              <div className="mt-3 grid grid-cols-2 gap-3">
                 <Campo label="Saldo" valor={dd.saldo} onGuardar={(v) => cambiar(dd, { saldo: v as number | null })} />
                 <Campo label="Fecha del saldo" tipo="fecha" valor={dd.saldoFecha} onGuardar={(v) => v && cambiar(dd, { saldoFecha: v as string })} />
                 <Campo label="Tasa E.A. (%)" tipo="porcentaje" valor={dd.tasaEA} onGuardar={(v) => cambiar(dd, { tasaEA: v as number | null })} />
                 <Campo label="Cuotas restantes" tipo="numero" valor={dd.cuotasRestantes} onGuardar={(v) => cambiar(dd, { cuotasRestantes: v as number | null })} />
                 <Campo label="Cuota" valor={dd.cuota} onGuardar={(v) => v && cambiar(dd, { cuota: v as number })} />
               </div>
-              <p className="mt-2 text-xs text-suave">Saldo y cuotas restantes son los de la fecha del saldo (por ejemplo, el del último extracto). Los pagos que registres después se descuentan solos.</p>
+              {dd.notas && <p className="mt-2 text-xs text-suave">{dd.notas}</p>}
             </details>
           </Tarjeta>
         )
@@ -178,11 +163,3 @@ export function Deudas() {
     </>
   )
 }
-
-const Dato = ({ titulo, valor, nota }: { titulo: string; valor: string | null; nota?: string }) => (
-  <div>
-    <p className="text-xs text-suave">{titulo}</p>
-    {valor == null ? <p className="font-semibold text-amber-900">Por confirmar</p> : <p className="font-semibold tabular-nums">{valor}</p>}
-    {nota && <p className="text-xs text-suave">{nota}</p>}
-  </div>
-)

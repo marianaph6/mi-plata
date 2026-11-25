@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { db, guardarConfig, hoy, useDatos, type Datos, type Recurrente } from '../db'
 import { acumulado, ahorroDebido, cop, csv, fechaCorta, fechaDe, fondoActual, leerValor, periodoDeFecha, reembolso, sumarMeses } from '../lib/plata'
 import { exportar, guardar, importar } from '../lib/respaldo'
-import { Campo, Etiqueta, Fila, Tarjeta, botonSecundario, entrada } from '../ui'
+import { Campo, Etiqueta, Fila, Seccion, botonSecundario, entrada } from '../ui'
 
 const URL_APP = 'https://marianaph6.github.io/mi-plata/'
 
@@ -76,14 +76,12 @@ function Cuadre({ d }: { d: Datos }) {
     setAviso('Listo: Hoy ya calcula con tu saldo real.')
   }
   return (
-    <Tarjeta titulo="Cuadrar con mi cuenta">
-      <p className="text-sm text-suave">
-        Antes de cuadrar, marca en Pagos lo que ya pagaste y registra los gastos de hoy. Si después te llega plata de esta quincena, vuelve a cuadrar. {c && <>Último cuadre: {fechaCorta(c.fecha)}, {cop(c.saldo)}.</>}
-      </p>
-      <div className="mt-3 grid grid-cols-2 gap-3">
+    <Seccion titulo="Cuadrar con mi cuenta" resumen={c ? fechaCorta(c.fecha) : 'sin cuadrar'}>
+      <p className="text-xs text-suave">Primero marca en Pagos lo que ya pagaste.</p>
+      <div className="mt-2 grid grid-cols-2 gap-3">
         {campo('Saldo en la cuenta hoy', saldo, setSaldo)}
-        {campo('De eso, Pagos del 1', reserva, setReserva)}
-        {campo('De eso, fondo de emergencia', fondo, setFondo)}
+        {campo('Pagos del 1', reserva, setReserva)}
+        {campo('Fondo de emergencia', fondo, setFondo)}
         <div className="text-sm">
           <span className="text-suave">Libre</span>
           <p className={`mt-1 py-2 text-lg font-semibold tabular-nums ${s - r - f < 0 ? 'text-red-700' : ''}`}>{s ? cop(s - r - f) : '—'}</p>
@@ -91,7 +89,7 @@ function Cuadre({ d }: { d: Datos }) {
       </div>
       <button type="button" disabled={!s} onClick={cuadrar} className="mt-3 rounded-full bg-acento px-4 py-2 font-semibold text-white disabled:opacity-40">Cuadrar</button>
       {aviso && <p className="mt-2 text-sm">{aviso}</p>}
-    </Tarjeta>
+    </Seccion>
   )
 }
 
@@ -132,20 +130,18 @@ export function Mas() {
 
       <Cuadre key={`${d.cfg.reserva}-${fondo}`} d={d} />
 
-      <Tarjeta titulo="Ahorro">
-        <Fila izq="Cajitas – libertad financiera" der={cop(acumulado(d.movs, 'Ahorro'))} />
+      <Seccion titulo="Ahorro" resumen={debesAhorro > 0 ? <span className="text-amber-800">te debes {cop(debesAhorro)}</span> : cop(fondo)}>
+        <Fila izq="Cajitas" der={cop(acumulado(d.movs, 'Ahorro'))} />
         {debesAhorro > 0 && (
           <div className="my-1 flex items-center justify-between gap-3 rounded-xl bg-amber-50 p-3 text-sm">
-            <span>Te debes <b>{cop(debesAhorro)}</b> de cajitas sin hacer.</span>
+            <span>Te debes <b>{cop(debesAhorro)}</b></span>
             <a href={`#/gasto?cat=Ahorro&valor=${debesAhorro}`} className={`shrink-0 ${botonSecundario}`}>Ponerme al día</a>
           </div>
         )}
         <Fila izq="Fondo de emergencia" der={meta ? `${cop(fondo)} de ${cop(meta)}` : cop(fondo)} />
-        {meta ? (
-          <div className="mt-1 h-2 overflow-hidden rounded-full bg-linea">
-            <div className="h-full rounded-full bg-acento" style={{ width: `${Math.min(100, (fondo / meta) * 100)}%` }} />
-          </div>
-        ) : null}
+        {compartidos.map((r) => (
+          <Fila key={r.id} izq={`${r.compartido!.con} te debe (${r.nombre})`} der={cop(reembolso(r, d.movs))} />
+        ))}
         <div className="mt-3 grid grid-cols-2 gap-3">
           <Campo label="Meta del fondo" valor={meta} onGuardar={(v) => guardarConfig({ metaEmergencia: v as number | null })} />
         </div>
@@ -153,19 +149,9 @@ export function Mas() {
           <a href="#/gasto?cat=Fondo de emergencia" className={botonSecundario}>Abonar al fondo</a>
           <a href="#/gasto?tipo=ingreso&cat=Fondo de emergencia" className={botonSecundario}>Usé del fondo</a>
         </div>
-        <p className="mt-2 text-xs text-suave">Cajitas cuenta desde que empezaste a usar la app; el fondo, desde tu último cuadre.</p>
-      </Tarjeta>
+      </Seccion>
 
-      {compartidos.length > 0 && (
-        <Tarjeta titulo="Te deben">
-          {compartidos.map((r) => (
-            <Fila key={r.id} izq={`${r.compartido!.con} · ${r.nombre} (cobrar el ${fechaCorta(r.compartido!.proximo)})`} der={cop(reembolso(r, d.movs))} />
-          ))}
-          <p className="mt-1 text-xs text-suave">Cuando te pague, toca “Me pagó” en Hoy (aparece la semana del cobro).</p>
-        </Tarjeta>
-      )}
-
-      <Tarjeta titulo="Ingresos y reserva">
+      <Seccion titulo="Ingresos" resumen={cop(d.cfg.quincenas.reduce((t, q) => t + q.valor, 0))}>
         <div className="grid grid-cols-2 gap-3">
           {d.cfg.quincenas.map((q) => (
             <Campo key={q.q} label={q.nombre} valor={q.valor} onGuardar={(v) => guardarConfig({ quincenas: d.cfg.quincenas.map((x) => (x.q === q.q ? { ...x, valor: (v as number) ?? 0 } : x)) })} />
@@ -173,16 +159,16 @@ export function Mas() {
           <Campo label="Separar para Pagos del 1" valor={d.cfg.reserva} onGuardar={(v) => guardarConfig({ reserva: (v as number) ?? 0 })} />
         </div>
         <a href="#/gasto?tipo=ingreso&cat=Prima" className={`mt-3 inline-block ${botonSecundario}`}>+ Ingreso extra</a>
-      </Tarjeta>
+      </Seccion>
 
-      <Tarjeta titulo="Pagos recurrentes">
+      <Seccion titulo="Pagos recurrentes" resumen={d.recs.filter((r) => r.activo).length}>
         {d.recs.map((r) => <EditarRecurrente key={r.id} r={r} />)}
         <button type="button" onClick={agregar} className={`mt-2 ${botonSecundario}`}>+ Agregar</button>
-        <p className="mt-2 text-xs text-suave">Sin día = presupuesto del mes (mercado, transporte): se reparte mitad y mitad entre quincenas. Desactiva en vez de borrar para no perder el historial.</p>
-      </Tarjeta>
+        <p className="mt-2 text-xs text-suave">Sin día = presupuesto del mes (mercado, transporte).</p>
+      </Seccion>
 
       {(porConfirmar.length > 0 || d.cfg.pendientes.length > 0) && (
-        <Tarjeta titulo="Por confirmar">
+        <Seccion titulo="Por confirmar" resumen={porConfirmar.length + d.cfg.pendientes.length}>
           <ul className="list-disc space-y-1 pl-5 text-sm">
             {porConfirmar.map((t) => <li key={t}>{t}</li>)}
           </ul>
@@ -192,13 +178,12 @@ export function Mas() {
               {t}
             </label>
           ))}
-          <p className="mt-2 text-xs text-suave">Los datos de deudas se completan en Deudas → Editar datos.</p>
-        </Tarjeta>
+        </Seccion>
       )}
 
-      <Tarjeta titulo="Exportar y respaldo">
-        <p className="text-sm text-suave">Tus datos viven solo en este teléfono. Guarda una copia en Archivos o iCloud de vez en cuando.</p>
-        <div className="mt-3 flex flex-wrap gap-2">
+      <Seccion titulo="Respaldo y Excel">
+        <p className="text-xs text-suave">Tus datos viven solo en este teléfono: guarda una copia de vez en cuando.</p>
+        <div className="mt-2 flex flex-wrap gap-2">
           <button type="button" onClick={async () => guardar(await exportar())} className="rounded-full bg-acento px-4 py-2 font-semibold text-white">Exportar respaldo</button>
           <label className={botonSecundario}>
             Restaurar
@@ -207,16 +192,16 @@ export function Mas() {
           <button type="button" onClick={() => guardar(new File([csv(d)], `mi-plata-${hoy()}.csv`, { type: 'text/csv' }))} className={botonSecundario}>Excel (CSV)</button>
         </div>
         {aviso && <p className="mt-2 text-sm">{aviso}</p>}
-      </Tarjeta>
+      </Seccion>
 
-      <Tarjeta titulo="Instalar y usar como widget" className="text-sm">
-        <ol className="list-decimal space-y-1 pl-5 text-suave">
+      <Seccion titulo="Widget e instalación">
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-suave">
           <li>Abre {URL_APP} en Safari → Compartir → <b>Agregar a pantalla de inicio</b>.</li>
           <li>App <b>Atajos</b> → nuevo atajo → acción <b>Abrir URL</b> con <code className="break-all">{URL_APP}#/gasto</code>.</li>
           <li>Mantén presionada la pantalla de inicio → <b>+</b> → <b>Atajos</b> → elige el atajo. Un toque y anotas un gasto.</li>
           <li>Opcional: Atajos → Automatización → <b>Hora del día</b> (8:00 a. m.) → abrir {URL_APP}#/hoy para ver lo que vence.</li>
         </ol>
-      </Tarjeta>
+      </Seccion>
     </>
   )
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { db, hoy, useDatos, type Medio } from '../db'
+import { db, hoy, type Medio } from '../db'
 import { GASTOS, INGRESOS, leerValor, sinSigno } from '../lib/plata'
 import { ir, useRuta } from '../lib/ruta'
 import { botonPrincipal, entrada } from '../ui'
@@ -8,7 +8,6 @@ import { botonPrincipal, entrada } from '../ui'
 export function Gasto() {
   const { params } = useRuta()
   const esIngreso = params.get('tipo') === 'ingreso'
-  const d = useDatos()
   const [valor, setValor] = useState(params.get('valor') ?? '')
   const [categoria, setCategoria] = useState(params.get('cat') ?? (esIngreso ? 'Quincena' : 'Mercado'))
   const [medio, setMedio] = useState<Medio>('cuenta')
@@ -16,7 +15,7 @@ export function Gasto() {
   const [nota, setNota] = useState('')
   const v = leerValor(valor)
   const pedida = params.get('cat')
-  const categorias = [...new Set([...(pedida ? [pedida] : []), ...(esIngreso ? INGRESOS : [...GASTOS, ...(d?.recs ?? []).map((r) => r.categoria)])])]
+  const categorias = [...new Set([...(pedida ? [pedida] : []), ...(esIngreso ? INGRESOS : GASTOS)])]
 
   const guardar = async () => {
     if (!v) return
