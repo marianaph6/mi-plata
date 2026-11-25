@@ -32,7 +32,7 @@ export function Campo({
 }: {
   label: string
   valor: string | number | null | undefined
-  tipo?: 'pesos' | 'numero' | 'porcentaje' | 'texto' | 'fecha'
+  tipo?: 'pesos' | 'numero' | 'porcentaje' | 'texto' | 'fecha' | 'mes'
   onGuardar: (v: string | number | null) => void
 }) {
   const mostrar =
@@ -44,7 +44,7 @@ export function Campo({
           ? String(Math.round(+valor * 10000) / 100).replace('.', ',')
           : String(valor)
   const leer = (s: string) => {
-    if (tipo === 'texto' || tipo === 'fecha') return s.trim()
+    if (tipo === 'texto' || tipo === 'fecha' || tipo === 'mes') return s.trim()
     if (s.trim() === '') return null
     if (tipo === 'porcentaje') return Number(s.replace(',', '.')) / 100 || null
     return leerValor(s)
@@ -53,12 +53,12 @@ export function Campo({
     <label className="block text-sm">
       <span className="text-suave">
         {label}
-        {mostrar === '' && tipo !== 'texto' && <Etiqueta color="bg-amber-100 text-amber-900">por confirmar</Etiqueta>}
+        {mostrar === '' && tipo !== 'texto' && tipo !== 'mes' && <Etiqueta color="bg-amber-100 text-amber-900">por confirmar</Etiqueta>}
       </span>
       <input
         key={mostrar}
         defaultValue={mostrar}
-        type={tipo === 'fecha' ? 'date' : 'text'}
+        type={tipo === 'fecha' ? 'date' : tipo === 'mes' ? 'month' : 'text'}
         inputMode={tipo === 'pesos' || tipo === 'numero' ? 'numeric' : tipo === 'porcentaje' ? 'decimal' : undefined}
         placeholder={tipo === 'porcentaje' ? 'ej. 7,1' : tipo === 'pesos' ? '0' : ''}
         onBlur={(e) => {

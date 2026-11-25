@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { db, hoy, useDatos, type Deuda, type Movimiento } from '../db'
-import { cop, estadoDeuda, fechaCorta, leerValor, mesCorto, simular } from '../lib/plata'
+import { PAGO_TARJETA, cop, estadoDeuda, fechaCorta, leerValor, mesCorto, saldoTarjeta, simular } from '../lib/plata'
 import { Campo, Etiqueta, Fila, Tarjeta, botonSecundario, entrada } from '../ui'
 
 function Simulador({ dd, e }: { dd: Deuda; e: ReturnType<typeof estadoDeuda> }) {
@@ -41,6 +41,65 @@ function Simulador({ dd, e }: { dd: Deuda; e: ReturnType<typeof estadoDeuda> }) 
   )
 }
 
+function TarjetaNubank({ t, movs, cambiar }: { t: Deuda; movs: Movimiento[]; cambiar: (c: Partial<Deuda>) => void }) {
+  const saldo = saldoTarjeta(t, movs)
+  const [texto, setTexto] = useState('')
+  const valor = leerValor(texto) || saldo
+  const pagos = movs.filter((m) => m.deudaId === t.id && m.tipo === 'gasto').sort((a, b) => a.fecha.localeCompare(b.fecha))
+  const pagarTarjeta = async () => {
+    if (!valor || !confirm(`¿Registrar pago de ${cop(valor)} a ${t.nombre} desde la cuenta?`)) return
+    await db.movimientos.add({ fecha: hoy(), tipo: 'gasto', valor, categoria: PAGO_TARJETA, medio: 'cuenta', nota: `Pago ${t.nombre}`, deudaId: t.id, creado: Date.now() })
+    setTexto('')
+    if (valor >= saldo && t.tarjeta?.acumula && confirm('Quedó en $0. ¿Vuelves a pagar cada cargo el mismo día?'))
+      cambiar({ tarjeta: { acumula: false, pagoFecha: null } })
+  }
+  return (
+    <Tarjeta>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h2 className="font-semibold">{t.nombre}</h2>
+          <p className="text-sm text-suave">{t.entidad} · corte el {t.dia}</p>
+        </div>
+        <Etiqueta>abonos: #{t.prioridad}</Etiqueta>
+      </div>
+      <p className="mt-3 text-xs text-suave">Debes</p>
+      <p className={`text-3xl font-bold tabular-nums ${saldo > 0 ? 'text-red-700' : ''}`}>{cop(saldo)}</p>
+      <label className="mt-3 flex items-start gap-2 text-sm">
+        <input type="checkbox" className="mt-0.5 size-5" checked={!!t.tarjeta?.acumula} onChange={(e) => cambiar({ tarjeta: { pagoFecha: t.tarjeta?.pagoFecha ?? null, acumula: e.target.checked } })} />
+        <span>Los cargos nuevos se acumulan aquí y salen de la cuenta solo cuando pagues la tarjeta.</span>
+      </label>
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <Campo label="Fecha en que la pagas" tipo="fecha" valor={t.tarjeta?.pagoFecha} onGuardar={(v) => cambiar({ tarjeta: { acumula: !!t.tarjeta?.acumula, pagoFecha: (v as string) || null } })} />
+      </div>
+      {saldo > 0 && (
+        <div className="mt-3 flex gap-2">
+          <input inputMode="numeric" aria-label="Valor pagado" placeholder={cop(saldo)} value={leerValor(texto) ? cop(leerValor(texto)) : ''} onChange={(e) => setTexto(e.target.value)} className={entrada} />
+          <button type="button" onClick={pagarTarjeta} className={`shrink-0 ${botonSecundario}`}>Pagué</button>
+        </div>
+      )}
+      {t.notas && <p className="mt-2 text-sm text-suave">{t.notas}</p>}
+      <details className="mt-3">
+        <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">Pagos a la tarjeta</summary>
+        {pagos.length ? (
+          <ul className="text-sm">
+            {[...pagos].reverse().map((m) => (
+              <li key={m.id} className="flex justify-between py-0.5"><span>{fechaCorta(m.fecha)}</span><span className="tabular-nums">{cop(m.valor)}</span></li>
+            ))}
+          </ul>
+        ) : <p className="text-sm text-suave">Aún no hay pagos.</p>}
+      </details>
+      <details>
+        <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">Corregir saldo</summary>
+        <div className="grid grid-cols-2 gap-3">
+          <Campo label="Saldo (extracto o app)" valor={t.saldo} onGuardar={(v) => cambiar({ saldo: v as number | null })} />
+          <Campo label="Al final del día" tipo="fecha" valor={t.saldoFecha} onGuardar={(v) => v && cambiar({ saldoFecha: v as string })} />
+        </div>
+        <p className="mt-2 text-xs text-suave">Los cargos y pagos que registres después de ese día se suman o restan solos.</p>
+      </details>
+    </Tarjeta>
+  )
+}
+
 const historial = (ms: Movimiento[]) =>
   ms.length ? (
     <ul className="mt-1 text-sm">
@@ -75,6 +134,7 @@ export function Deudas() {
       {!deudas.length && <Tarjeta><p className="text-sm text-suave">No hay deudas registradas. Se cargan con tu archivo de datos (Más → Restaurar).</p></Tarjeta>}
 
       {deudas.map((dd) => {
+        if (dd.tarjeta) return <TarjetaNubank key={dd.id} t={dd} movs={d.movs} cambiar={(c) => cambiar(dd, c)} />
         const e = estadoDeuda(dd, d.movs, f)
         return (
           <Tarjeta key={dd.id}>

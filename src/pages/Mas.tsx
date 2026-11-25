@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { db, guardarConfig, hoy, useDatos, type Recurrente } from '../db'
-import { acumulado, cop, csv, fechaCorta, reembolso } from '../lib/plata'
+import { db, guardarConfig, hoy, useDatos, type Datos, type Recurrente } from '../db'
+import { acumulado, ahorroDebido, cop, csv, fechaCorta, fechaDe, fondoActual, leerValor, periodoDeFecha, reembolso, sumarMeses } from '../lib/plata'
 import { exportar, guardar, importar } from '../lib/respaldo'
 import { Campo, Etiqueta, Fila, Tarjeta, botonSecundario, entrada } from '../ui'
 
@@ -24,6 +24,15 @@ function EditarRecurrente({ r }: { r: Recurrente }) {
         <Campo label="Categoría" tipo="texto" valor={r.categoria} onGuardar={(v) => v && cambiar({ categoria: v as string })} />
         <Campo label="Valor" valor={r.valor} onGuardar={(v) => cambiar({ valor: (v as number) ?? 0 })} />
         <Campo label="Día (vacío = sin día)" tipo="numero" valor={r.dia} onGuardar={(v) => cambiar({ dia: v == null ? null : Math.min(31, Math.max(1, v as number)) })} />
+        {r.categoria !== 'Ahorro' && (
+          <Campo
+            label="Pausado desde (mes)"
+            tipo="mes"
+            valor={r.pausa?.desde}
+            onGuardar={(v) => cambiar({ pausa: v ? { desde: v as string, hasta: r.pausa && r.pausa.hasta > (v as string) ? r.pausa.hasta : sumarMeses(v as string, 1) } : undefined })}
+          />
+        )}
+        {r.pausa && <Campo label="Vuelve en (mes)" tipo="mes" valor={r.pausa.hasta} onGuardar={(v) => v && (v as string) > r.pausa!.desde && cambiar({ pausa: { ...r.pausa!, hasta: v as string } })} />}
         {r.compartido && <Campo label="Mi parte" valor={r.miParte} onGuardar={(v) => cambiar({ miParte: (v as number) ?? undefined })} />}
         {r.compartido && <Campo label={`Próximo cobro a ${r.compartido.con}`} tipo="fecha" valor={r.compartido.proximo} onGuardar={(v) => v && cambiar({ compartido: { ...r.compartido!, proximo: v as string } })} />}
         <label className="block text-sm">
@@ -43,6 +52,49 @@ function EditarRecurrente({ r }: { r: Recurrente }) {
   )
 }
 
+function Cuadre({ d }: { d: Datos }) {
+  const c = d.cfg.cuadre
+  const [saldo, setSaldo] = useState('')
+  const [reserva, setReserva] = useState(String(d.cfg.reserva))
+  const [fondo, setFondo] = useState(String(fondoActual(d)))
+  const [aviso, setAviso] = useState('')
+  const [s, r, f] = [leerValor(saldo), leerValor(reserva), leerValor(fondo)]
+  const campo = (label: string, valor: string, set: (v: string) => void) => (
+    <label className="block text-sm">
+      <span className="text-suave">{label}</span>
+      <input inputMode="numeric" value={leerValor(valor) ? cop(leerValor(valor)) : ''} placeholder="$0" onChange={(e) => set(e.target.value)} className={`mt-1 ${entrada}`} />
+    </label>
+  )
+  const cuadrar = async () => {
+    const f0 = hoy()
+    await guardarConfig({ cuadre: { fecha: f0, creado: Date.now(), saldo: s, reserva: r, fondo: f } })
+    // En la segunda quincena, lo guardado para el 1 cuenta como reserva separada.
+    const p = periodoDeFecha(f0)
+    if (p.q === 2 && r > 0 && !d.movs.some((m) => m.tipo === 'reserva' && m.vence?.startsWith(p.mes)))
+      await db.movimientos.add({ fecha: f0, tipo: 'reserva', valor: r, categoria: 'Pagos del 1', medio: 'cuenta', vence: fechaDe(p.mes, 15), creado: Date.now() })
+    setSaldo('')
+    setAviso('Listo: Hoy ya calcula con tu saldo real.')
+  }
+  return (
+    <Tarjeta titulo="Cuadrar con mi cuenta">
+      <p className="text-sm text-suave">
+        Antes de cuadrar, marca en Pagos lo que ya pagaste y registra los gastos de hoy. Si después te llega plata de esta quincena, vuelve a cuadrar. {c && <>Último cuadre: {fechaCorta(c.fecha)}, {cop(c.saldo)}.</>}
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        {campo('Saldo en la cuenta hoy', saldo, setSaldo)}
+        {campo('De eso, Pagos del 1', reserva, setReserva)}
+        {campo('De eso, fondo de emergencia', fondo, setFondo)}
+        <div className="text-sm">
+          <span className="text-suave">Libre</span>
+          <p className={`mt-1 py-2 text-lg font-semibold tabular-nums ${s - r - f < 0 ? 'text-red-700' : ''}`}>{s ? cop(s - r - f) : '—'}</p>
+        </div>
+      </div>
+      <button type="button" disabled={!s} onClick={cuadrar} className="mt-3 rounded-full bg-acento px-4 py-2 font-semibold text-white disabled:opacity-40">Cuadrar</button>
+      {aviso && <p className="mt-2 text-sm">{aviso}</p>}
+    </Tarjeta>
+  )
+}
+
 export function Mas() {
   const d = useDatos()
   const [aviso, setAviso] = useState('')
@@ -58,11 +110,13 @@ export function Mas() {
     }
   }
   const agregar = () => db.recurrentes.add({ nombre: 'Nuevo pago', categoria: 'Otros', valor: 0, dia: 1, medio: 'cuenta', tipo: 'fijo', activo: true })
-  const fondo = acumulado(d.movs, 'Fondo de emergencia')
+  const fondo = fondoActual(d)
+  const debesAhorro = ahorroDebido(d, hoy())
   const meta = d.cfg.metaEmergencia
   const compartidos = d.recs.filter((r) => r.activo && r.compartido)
   const porConfirmar = [
-    ...d.deudas.flatMap((x) => [
+    ...d.deudas.filter((x) => x.tarjeta && !x.tarjeta.pagoFecha && x.saldo).map((x) => `${x.nombre}: fecha en que la vas a pagar`),
+    ...d.deudas.filter((x) => !x.tarjeta).flatMap((x) => [
       x.saldo == null && `${x.nombre}: saldo`,
       x.tasaEA == null && `${x.nombre}: tasa`,
       x.cuotasRestantes == null && x.tasaEA == null && `${x.nombre}: cuotas restantes`,
@@ -76,8 +130,16 @@ export function Mas() {
     <>
       <h1 className="text-3xl font-bold tracking-tight">Más</h1>
 
+      <Cuadre key={`${d.cfg.reserva}-${fondo}`} d={d} />
+
       <Tarjeta titulo="Ahorro">
         <Fila izq="Cajitas – libertad financiera" der={cop(acumulado(d.movs, 'Ahorro'))} />
+        {debesAhorro > 0 && (
+          <div className="my-1 flex items-center justify-between gap-3 rounded-xl bg-amber-50 p-3 text-sm">
+            <span>Te debes <b>{cop(debesAhorro)}</b> de cajitas sin hacer.</span>
+            <a href={`#/gasto?cat=Ahorro&valor=${debesAhorro}`} className={`shrink-0 ${botonSecundario}`}>Ponerme al día</a>
+          </div>
+        )}
         <Fila izq="Fondo de emergencia" der={meta ? `${cop(fondo)} de ${cop(meta)}` : cop(fondo)} />
         {meta ? (
           <div className="mt-1 h-2 overflow-hidden rounded-full bg-linea">
@@ -91,7 +153,7 @@ export function Mas() {
           <a href="#/gasto?cat=Fondo de emergencia" className={botonSecundario}>Abonar al fondo</a>
           <a href="#/gasto?tipo=ingreso&cat=Fondo de emergencia" className={botonSecundario}>Usé del fondo</a>
         </div>
-        <p className="mt-2 text-xs text-suave">Cuenta desde que empezaste a usar la app.</p>
+        <p className="mt-2 text-xs text-suave">Cajitas cuenta desde que empezaste a usar la app; el fondo, desde tu último cuadre.</p>
       </Tarjeta>
 
       {compartidos.length > 0 && (

@@ -32,6 +32,7 @@ export interface Recurrente {
   enRevision?: boolean
   deudaId?: number
   compartido?: { con: string; cadaMeses: number; proximo: string }
+  pausa?: { desde: string; hasta: string } // meses YYYY-MM: no se cobra desde `desde` y vuelve en `hasta`
   activo: boolean
 }
 
@@ -49,6 +50,9 @@ export interface Deuda {
   prioridad: number
   notas?: string
   enlace?: string
+  // Tarjeta que se paga de una vez (Nubank). acumula: los cargos nuevos con ese medio suman al saldo
+  // y salen de la cuenta solo cuando se paga la tarjeta.
+  tarjeta?: { acumula: boolean; pagoFecha: string | null }
 }
 
 export interface Config {
@@ -58,6 +62,8 @@ export interface Config {
   inicio: string // pagos anteriores a esta fecha no salen como pendientes
   metaEmergencia: number | null
   pendientes: string[]
+  // Saldo real de la cuenta en un momento: desde ahí la quincena actual se calcula con plata real.
+  cuadre?: { fecha: string; creado: number; saldo: number; reserva: number; fondo: number }
 }
 
 class Base extends Dexie {

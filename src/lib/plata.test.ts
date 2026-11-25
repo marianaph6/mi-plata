@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Config, Datos, Deuda, Movimiento, Recurrente } from '../db'
 import {
+  PAGO_TARJETA,
+  ahorroDebido,
   cop,
+  fondoActual,
+  ocurrencias,
+  saldoTarjeta,
   csv,
   estadoDeuda,
   fechaDe,
@@ -159,5 +164,89 @@ describe('csv', () => {
     const t = csv(datos([mov({ valor: 1000, nota: 'pan; leche "deslac"' })]))
     expect(t.startsWith('﻿Fecha;')).toBe(true)
     expect(t).toContain(';-1000;"pan; leche ""deslac""";')
+  })
+})
+
+describe('pausas', () => {
+  const pausados = recs.map((r) => (r.id === 3 ? { ...r, pausa: { desde: '2026-03', hasta: '2026-04' } } : r))
+  const d = { ...datos(), recs: pausados }
+  it('un pago pausado no se cobra, no se espera ni cuenta en el presupuesto, y vuelve solo', () => {
+    expect(ocurrencias(pausados, '2026-03').map((o) => o.r.nombre)).not.toContain('Gym')
+    expect(ocurrencias(pausados, '2026-04').map((o) => o.r.nombre)).toContain('Gym')
+    expect(flujo({ mes: '2026-03', q: 2 }, d).porPagar).toBe(20_000)
+    expect(presupuesto('2026-03', d).find((x) => x.categoria === 'Salud')).toBeUndefined()
+    expect(presupuesto('2026-04', d).find((x) => x.categoria === 'Salud')?.plan).toBe(100_000)
+  })
+})
+
+describe('tarjeta que acumula', () => {
+  const tarjeta: Deuda = {
+    id: 9, nombre: 'Tarjeta', entidad: 'N', cuota: 0, dia: 18, saldo: 300_000, saldoFecha: '2026-03-05', tasaEA: null,
+    cuotasRestantes: null, modoAbono: 'plazo', prioridad: 0, tarjeta: { acumula: true, pagoFecha: '2026-03-20' },
+  }
+  it('suma cargos nuevos y resta pagos', () => {
+    const movs = [
+      mov({ valor: 99_000, medio: 'nubank', vence: '2026-03-01' }), // ya iba en el saldo
+      mov({ valor: 50_000, medio: 'nubank', recurrenteId: 2, vence: '2026-03-10', fecha: '2026-03-10' }),
+      mov({ valor: 100_000, deudaId: 9, fecha: '2026-03-21', categoria: PAGO_TARJETA }),
+    ]
+    expect(saldoTarjeta(tarjeta, movs)).toBe(250_000)
+    expect(saldoTarjeta({ ...tarjeta, tarjeta: { acumula: false, pagoFecha: null } }, movs)).toBe(200_000)
+  })
+  it('los cargos no salen de la cuenta; el pago de la tarjeta sí, en su fecha', () => {
+    const d = datos([mov({ valor: 40_000, medio: 'nubank', fecha: '2026-03-16', categoria: 'Salidas' })], [tarjeta])
+    expect(flujo({ mes: '2026-03', q: 1 }, d).porPagar).toBe(1_100_000) // sin el celular de Nubank
+    const q2 = flujo({ mes: '2026-03', q: 2 }, d)
+    expect(q2.salio).toBe(0)
+    expect(q2.porPagar).toBe(340_000) // solo la tarjeta: 300.000 + 40.000 de la salida
+  })
+  it('el pago de la tarjeta no cuenta como gasto en el presupuesto', () => {
+    const pago = mov({ valor: 100_000, deudaId: 9, fecha: '2026-03-21', categoria: PAGO_TARJETA })
+    expect(presupuesto('2026-03', datos([pago], [tarjeta])).map((x) => x.categoria)).not.toContain(PAGO_TARJETA)
+  })
+})
+
+describe('cuadre con el saldo real', () => {
+  const cuadre = { fecha: '2026-03-24', creado: 1000, saldo: 2_000_000, reserva: 500_000, fondo: 300_000 }
+  const conCuadre = (movs: Movimiento[] = []): Datos => ({ ...datos(movs), cfg: { ...cfg, cuadre } })
+  const hoyQ2 = '2026-03-24'
+  const p = { mes: '2026-03', q: 2 as const }
+
+  it('parte del saldo y aparta fondo, reserva, pagos y presupuesto', () => {
+    const f = flujo(p, conCuadre(), hoyQ2)
+    expect(f.cuadre?.saldo).toBe(2_000_000)
+    expect(f.porPagar).toBe(120_000) // gym y nube siguen pendientes aunque vencieron
+    expect(f.libre).toBe(2_000_000 - 300_000 - 500_000 - 120_000 - 100_000)
+  })
+  it('descuenta solo lo registrado después del cuadre y deja la quincena siguiente para su periodo', () => {
+    const base = flujo(p, conCuadre(), hoyQ2).libre
+    const movs = [
+      mov({ valor: 70_000, fecha: '2026-03-23', creado: 500 }), // ya estaba reflejado en el saldo
+      mov({ valor: 50_000, fecha: '2026-03-24', creado: 2000 }),
+      mov({ tipo: 'ingreso', valor: 1_000_000, fecha: '2026-03-30', categoria: 'Quincena', creado: 2001 }),
+    ]
+    expect(flujo(p, conCuadre(movs), hoyQ2).libre).toBe(base - 50_000)
+  })
+  it('abonar al fondo no cambia el saldo pero sí lo libre', () => {
+    const abono = mov({ valor: 100_000, fecha: '2026-03-24', creado: 2000, categoria: 'Fondo de emergencia' })
+    const f = flujo(p, conCuadre([abono]), hoyQ2)
+    expect(f.cuadre?.saldo).toBe(2_000_000)
+    expect(fondoActual(conCuadre([abono]))).toBe(400_000)
+    expect(f.libre).toBe(flujo(p, conCuadre(), hoyQ2).libre - 100_000)
+  })
+  it('en la quincena siguiente espera su quincena y usa la reserva', () => {
+    const f = flujo({ mes: '2026-04', q: 1 }, conCuadre(), '2026-04-02')
+    expect(f.cuadre?.esperada).toBe(1_000_000)
+    expect(f.cuadre?.guardar).toBe(0)
+    expect(flujo({ mes: '2026-04', q: 1 }, conCuadre(), '2026-03-24').cuadre).toBeNull() // otra quincena: plan
+  })
+})
+
+describe('ahorro que te debes', () => {
+  it('suma las cajitas que tocaban y resta lo aportado', () => {
+    const cajita: Recurrente = { id: 8, nombre: 'Cajita', categoria: 'Ahorro', valor: 100_000, dia: 15, medio: 'cuenta', tipo: 'fijo', activo: true }
+    const d: Datos = { ...datos([mov({ valor: 100_000, categoria: 'Ahorro', fecha: '2026-03-15' })]), recs: [cajita], cfg: { ...cfg, inicio: '2026-03-01' } }
+    expect(ahorroDebido(d, '2026-04-20')).toBe(100_000)
+    expect(ahorroDebido(d, '2026-04-10')).toBe(0)
   })
 })

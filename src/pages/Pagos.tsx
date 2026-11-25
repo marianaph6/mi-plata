@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { db, hoy, pagar, useDatos } from '../db'
-import { cop, fechaCorta, leerValor, nombreMes, ocurrencias, pagoDe, presupuesto, sumarMeses } from '../lib/plata'
+import { db, hoy, pagar, useDatos, type Recurrente } from '../db'
+import { cop, fechaCorta, leerValor, mesCorto, nombreMes, ocurrencias, pagoDe, pausado, presupuesto, sumarMeses } from '../lib/plata'
 import { Etiqueta, Fila, Tarjeta, botonSecundario, entrada } from '../ui'
 
 export function Pagos() {
@@ -19,6 +19,10 @@ export function Pagos() {
   const categorias = presupuesto(mes, d)
   const planTotal = categorias.reduce((t, c) => t + c.plan, 0)
   const realTotal = categorias.reduce((t, c) => t + c.real, 0)
+  const enPausa = d.recs.filter((r) => r.activo && pausado(r, mes))
+  // Pausar solo este mes; si ya venía pausado hasta este mes, se alarga.
+  const pausarMes = (r: Recurrente) =>
+    db.recurrentes.update(r.id!, { pausa: { desde: r.pausa?.hasta === mes ? r.pausa.desde : mes, hasta: sumarMeses(mes, 1) } })
   const tope = Math.max(...categorias.map((c) => Math.max(c.plan, c.real)), 1)
 
   return (
@@ -74,12 +78,37 @@ export function Pagos() {
                     <button type="button" onClick={() => marcar(leerValor(valor) || r.valor)} className={`shrink-0 ${botonSecundario}`}>Pagado</button>
                   </div>
                 )}
+                {abierto === clave && !pago && (
+                  <div className="mt-2 pl-14">
+                    {r.categoria === 'Ahorro' ? (
+                      <p className="text-xs text-suave">El ahorro no se pausa: si no lo haces, queda en Más → Ahorro como lo que te debes.</p>
+                    ) : (
+                      <button type="button" onClick={() => pausarMes(r)} className={`w-full ${botonSecundario}`}>No lo pago este mes (pausar)</button>
+                    )}
+                  </div>
+                )}
               </li>
             )
           })}
         </ul>
-        <p className="mt-1 text-xs text-suave">Toca el nombre para pagar un valor distinto (por ejemplo EPM).</p>
+        <p className="mt-1 text-xs text-suave">Toca el nombre para pagar un valor distinto (por ejemplo EPM) o para pausarlo este mes.</p>
       </Tarjeta>
+
+      {enPausa.length > 0 && (
+        <Tarjeta titulo="En pausa este mes">
+          <ul className="divide-y divide-linea">
+            {enPausa.map((r) => (
+              <li key={r.id} className="flex items-center justify-between gap-3 py-2">
+                <span className="min-w-0">
+                  <span className="block truncate">{r.nombre}</span>
+                  <span className="text-sm text-suave">vuelve en {mesCorto(r.pausa!.hasta)} · {cop(r.valor)}</span>
+                </span>
+                <button type="button" onClick={() => db.recurrentes.update(r.id!, { pausa: undefined })} className={`shrink-0 ${botonSecundario}`}>Reactivar</button>
+              </li>
+            ))}
+          </ul>
+        </Tarjeta>
+      )}
 
       <Tarjeta titulo="Presupuesto vs. real">
         <ul className="space-y-3">

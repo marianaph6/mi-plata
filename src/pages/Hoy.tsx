@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { db, hoy, pagar, useDatos, type Datos } from '../db'
 import {
   cop,
+  diasEntre,
   fechaCorta,
   fechaDe,
   fechaLarga,
@@ -11,6 +12,7 @@ import {
   periodoDeIngreso,
   proximos,
   reembolso,
+  saldoTarjeta,
   siguiente,
   sumarDias,
   sumarMeses,
@@ -28,22 +30,43 @@ const cuandoVence = (faltan: number) =>
 const hasta = (p: Periodo) => fechaCorta(fechaDe(p.mes, p.q === 1 ? 14 : 31))
 
 function Quincena({ d, p, actual }: { d: Datos; p: Periodo; actual: boolean }) {
-  const f = flujo(p, d)
+  const f = flujo(p, d, actual ? hoy() : undefined)
+  const c = f.cuadre
   const separarReserva = () =>
     db.movimientos.add({ fecha: hoy(), tipo: 'reserva', valor: d.cfg.reserva, categoria: 'Pagos del 1', medio: 'cuenta', vence: fechaDe(p.mes, 15), creado: Date.now() })
+  const pagos = (
+    <Fila suave izq={`Pagos por hacer (${f.pendientes.length + f.tarjetas.length})`} der={`−${cop(f.porPagar)}`} />
+  )
+  const porGastar = f.variables.length > 0 && (
+    <Fila suave izq={`Por gastar: ${f.variables.map((v) => v.r.nombre.toLowerCase()).join(', ')}`} der={`−${cop(f.porGastar)}`} />
+  )
   return (
     <Tarjeta className={actual ? '' : 'opacity-90'}>
       <p className="text-sm text-suave">{actual ? `Libre hasta el ${hasta(p)}` : `Siguiente: del ${p.q === 1 ? 1 : 15} al ${hasta(p)}`}</p>
       <p className={`font-bold tracking-tight tabular-nums ${actual ? 'text-4xl' : 'text-2xl'} ${f.libre < 0 ? 'text-red-700' : ''}`}>{cop(f.libre)}</p>
-      <div className="mt-2 border-t border-linea pt-2">
-        <Fila suave izq={<>Entra · {f.nombre.toLowerCase()}{!f.llego && <Etiqueta>esperada</Etiqueta>}</>} der={cop(f.entra)} />
-        {p.q === 1 && <Fila suave izq={<>Reserva Pagos del 1{!f.entraReserva && <Etiqueta color="bg-red-100 text-red-800">no separada</Etiqueta>}</>} der={`+${cop(f.entraReserva)}`} />}
-        {actual && <Fila suave izq="Ya salió" der={`−${cop(f.salio)}`} />}
-        <Fila suave izq={`Pagos por hacer (${f.pendientes.length})`} der={`−${cop(f.porPagar)}`} />
-        <Fila suave izq={`Por gastar: ${f.variables.map((v) => v.r.nombre.toLowerCase()).join(', ')}`} der={`−${cop(f.porGastar)}`} />
-        {p.q === 2 && <Fila suave izq={<>Separar Pagos del 1{f.reservaHecha && <Etiqueta color="bg-emerald-100 text-emerald-900">hecho</Etiqueta>}</>} der={`−${cop(f.separar)}`} />}
-      </div>
-      {actual && p.q === 2 && !f.reservaHecha && d.cfg.reserva > 0 && (
+      {actual && f.libre < 0 && <p className="text-sm text-red-700">Te faltan {cop(-f.libre)} para cubrir esta quincena.</p>}
+      {c ? (
+        <div className="mt-2 border-t border-linea pt-2">
+          <Fila suave izq={<>Saldo en la cuenta<Etiqueta>cuadre {fechaCorta(c.fecha)}</Etiqueta></>} der={cop(c.saldo)} />
+          {c.esperada > 0 && <Fila suave izq={<>Entra · {f.nombre.toLowerCase()}<Etiqueta>esperada</Etiqueta></>} der={`+${cop(c.esperada)}`} />}
+          <Fila suave izq="Fondo de emergencia (no se toca)" der={`−${cop(c.fondo)}`} />
+          {c.guardar > 0 && <Fila suave izq="Pagos del 1 (guardado)" der={`−${cop(c.guardar)}`} />}
+          {pagos}
+          {porGastar}
+          <a href="#/mas" className="mt-1 inline-block text-sm font-semibold text-acento">Volver a cuadrar</a>
+        </div>
+      ) : (
+        <div className="mt-2 border-t border-linea pt-2">
+          <Fila suave izq={<>Entra · {f.nombre.toLowerCase()}{!f.llego && <Etiqueta>esperada</Etiqueta>}</>} der={cop(f.entra)} />
+          {p.q === 1 && <Fila suave izq={<>Reserva Pagos del 1{!f.entraReserva && <Etiqueta color="bg-red-100 text-red-800">no separada</Etiqueta>}</>} der={`+${cop(f.entraReserva)}`} />}
+          {actual && <Fila suave izq="Ya salió" der={`−${cop(f.salio)}`} />}
+          {pagos}
+          {porGastar}
+          {p.q === 2 && <Fila suave izq={<>Separar Pagos del 1{f.reservaHecha && <Etiqueta color="bg-emerald-100 text-emerald-900">hecho</Etiqueta>}</>} der={`−${cop(f.separar)}`} />}
+          {actual && <a href="#/mas" className="mt-1 inline-block text-sm font-semibold text-acento">Cuadrar con mi cuenta</a>}
+        </div>
+      )}
+      {actual && !c && p.q === 2 && !f.reservaHecha && d.cfg.reserva > 0 && (
         <button type="button" onClick={separarReserva} className={`mt-3 w-full ${botonSecundario}`}>
           Ya separé {cop(d.cfg.reserva)} en Pagos del 1
         </button>
@@ -69,7 +92,14 @@ export function Hoy() {
   const pIngreso = periodoDeIngreso(f)
   const quincena = d.cfg.quincenas.find((x) => x.q === pIngreso.q)!
   const llego = d.movs.some((m) => m.tipo === 'ingreso' && m.categoria === 'Quincena' && igual(periodoDeIngreso(m.fecha), pIngreso))
+  // Si cuadraste en esta misma quincena, la plata que ya llegó está dentro del saldo: registrarla la contaría dos veces.
+  const cuadradaYa = !!d.cfg.cuadre && igual(periodoDeIngreso(d.cfg.cuadre.fecha), pIngreso)
   const avisos = proximos(d, f)
+  const acumula = d.deudas.some((t) => t.tarjeta?.acumula)
+  const tarjetas = d.deudas
+    .filter((t) => t.tarjeta)
+    .map((t) => ({ t, saldo: saldoTarjeta(t, d.movs), fecha: t.tarjeta!.pagoFecha }))
+    .filter((x) => x.saldo > 0 && (!x.fecha || x.fecha <= sumarDias(f, 7)))
   const cobros = d.recs.filter((r) => r.activo && r.compartido && r.compartido.proximo <= sumarDias(f, 7))
   const ultimos = [...d.movs].sort((a, b) => b.creado - a.creado).slice(0, 8)
 
@@ -105,7 +135,7 @@ export function Hoy() {
 
       <a href="#/gasto" className={`mt-4 block text-center ${botonPrincipal}`}>+ Gasto</a>
 
-      {!llego && quincena.valor > 0 && !(dia >= 10 && dia < 15) && (
+      {!llego && !cuadradaYa && quincena.valor > 0 && !(dia >= 10 && dia < 15) && (
         <a href={`#/gasto?tipo=ingreso&cat=Quincena&valor=${quincena.valor}`} className={`mt-2 block text-center ${botonSecundario}`}>
           ¿Llegó la {quincena.nombre.toLowerCase()}? Regístrala
         </a>
@@ -114,6 +144,15 @@ export function Hoy() {
       <Quincena d={d} p={p} actual />
 
       <Tarjeta titulo="Próximos 7 días">
+        {tarjetas.map(({ t, saldo, fecha }) => (
+          <a key={t.id} href="#/deudas" className="mb-2 flex items-center justify-between gap-3 rounded-xl bg-amber-50 p-3 text-sm">
+            <span>
+              <b>{t.nombre}</b>: debes {cop(saldo)}
+              {fecha ? <> · pagar el {fechaCorta(fecha)}{cuandoVence(diasEntre(f, fecha))}</> : ' · elige la fecha de pago'}
+            </span>
+            <span aria-hidden>›</span>
+          </a>
+        ))}
         {!avisos.length && <p className="text-sm text-suave">Nada por pagar esta semana. 🎉</p>}
         <ul className="divide-y divide-linea">
           {avisos.map((o) => (
@@ -129,7 +168,7 @@ export function Hoy() {
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{o.r.nombre}</p>
                 <p className="text-sm text-suave">
-                  {fechaCorta(o.vence)} · {o.r.medio === 'nubank' ? 'Nubank' : 'Cuenta'}
+                  {fechaCorta(o.vence)} · {o.r.medio === 'nubank' ? (acumula ? 'se suma a Nubank' : 'Nubank') : 'Cuenta'}
                   {cuandoVence(o.faltan)}
                 </p>
               </div>

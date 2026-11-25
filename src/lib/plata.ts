@@ -37,6 +37,7 @@ export const fechaLarga = (f: string) => fmtLarga.format(aUTC(f))
 // ---------- Quincenas ----------
 export type Periodo = { mes: string; q: 1 | 2 }
 export const igual = (a: Periodo, b: Periodo) => a.mes === b.mes && a.q === b.q
+const orden = (p: Periodo) => `${p.mes}-${p.q}` // se compara como texto: 2026-11-2 < 2026-12-1
 export const siguiente = (p: Periodo): Periodo => (p.q === 1 ? { mes: p.mes, q: 2 } : { mes: sumarMeses(p.mes, 1), q: 1 })
 /** Del 1 al 14 es la quincena 1; del 15 al fin de mes, la 2. */
 export const periodoDeFecha = (f: string): Periodo => ({ mes: f.slice(0, 7), q: +f.slice(8) < 15 ? 1 : 2 })
@@ -49,8 +50,11 @@ export const periodoDeIngreso = (f: string): Periodo => {
 export const periodoDeGasto = (m: Movimiento) => periodoDeFecha(m.vence ?? m.fecha)
 
 // ---------- Pagos recurrentes ----------
+export const pausado = (r: Recurrente, mes: string) => !!r.pausa && r.pausa.desde <= mes && mes < r.pausa.hasta
+export const activoEn = (r: Recurrente, mes: string) => r.activo && !pausado(r, mes)
+
 export const ocurrencias = (recs: Recurrente[], mes: string) =>
-  recs.filter((r) => r.activo && r.dia).map((r) => ({ r, vence: fechaDe(mes, r.dia!) }))
+  recs.filter((r) => r.dia && activoEn(r, mes)).map((r) => ({ r, vence: fechaDe(mes, r.dia!) }))
 
 export const pagoDe = (movs: Movimiento[], r: Recurrente, mes: string) =>
   movs.find((m) => m.tipo === 'gasto' && m.recurrenteId === r.id && m.vence?.startsWith(mes))
@@ -66,9 +70,42 @@ export function proximos(d: Datos, hoyF: string, dias = 7) {
     .sort((a, b) => a.vence.localeCompare(b.vence))
 }
 
+// ---------- Tarjeta (Nubank) ----------
+export const PAGO_TARJETA = 'Pago tarjeta'
+// shortcut: una sola tarjeta (todo lo que se paga con medio 'nubank'); si llega otra, agregar el medio a la deuda.
+export const acumulaTarjeta = (d: Datos) => d.deudas.some((t) => t.tarjeta?.acumula)
+
+/** Saldo al final del día `saldoFecha` + cargos nuevos (si acumula) − pagos a la tarjeta. */
+export function saldoTarjeta(t: Deuda, movs: Movimiento[]) {
+  let s = t.saldo ?? 0
+  for (const m of movs) {
+    if (m.tipo !== 'gasto') continue
+    if (m.deudaId === t.id) s -= m.fecha > t.saldoFecha ? m.valor : 0
+    else if (t.tarjeta?.acumula && m.medio === 'nubank' && (m.vence ?? m.fecha) > t.saldoFecha) s += m.valor
+  }
+  return Math.max(0, s)
+}
+
+/** Fondo de emergencia: lo que dijiste en el último cuadre + lo que entró o salió después. */
+export function fondoActual(d: Datos) {
+  const c = d.cfg.cuadre
+  const neto = (m: Movimiento) => (m.tipo === 'gasto' ? m.valor : -m.valor)
+  return d.movs.reduce(
+    (t, m) => (m.categoria === 'Fondo de emergencia' && m.tipo !== 'reserva' && (!c || despuesDe(c, m)) ? t + neto(m) : t),
+    c?.fondo ?? 0,
+  )
+}
+const despuesDe = (c: NonNullable<Datos['cfg']['cuadre']>, m: Movimiento) => m.creado > c.creado && m.fecha >= c.fecha
+
 // ---------- Flujo de una quincena ----------
-export function flujo(p: Periodo, d: Datos) {
+/**
+ * Plan de una quincena. Si es la quincena de hoy (`hoyF`) y hay un cuadre, parte del saldo real de la cuenta
+ * en vez de la quincena esperada.
+ */
+export function flujo(p: Periodo, d: Datos, hoyF?: string) {
   const { movs, recs, cfg } = d
+  const acumula = acumulaTarjeta(d)
+  const deCuenta = (m: Movimiento) => !(acumula && m.medio === 'nubank')
   const ingresos = movs.filter((m) => m.tipo === 'ingreso' && igual(periodoDeIngreso(m.fecha), p))
   const llego = ingresos.some((m) => m.categoria === 'Quincena')
   const quincena = cfg.quincenas.find((x) => x.q === p.q)!
@@ -77,31 +114,41 @@ export function flujo(p: Periodo, d: Datos) {
   const reservaHecha = p.q === 2 ? movs.find((m) => m.tipo === 'reserva' && m.vence?.startsWith(p.mes)) : undefined
   const gastos = movs.filter((m) => m.tipo === 'gasto' && igual(periodoDeGasto(m), p))
   const pendientes = ocurrencias(recs, p.mes).filter(
-    (o) => periodoDeFecha(o.vence).q === p.q && o.vence >= cfg.inicio && !pagoDe(movs, o.r, p.mes),
+    (o) => periodoDeFecha(o.vence).q === p.q && o.vence >= cfg.inicio && !pagoDe(movs, o.r, p.mes) && !(acumula && o.r.medio === 'nubank'),
   )
+  const tarjetas = d.deudas
+    .filter((t) => t.tarjeta?.pagoFecha && igual(periodoDeFecha(t.tarjeta.pagoFecha), p))
+    .map((t) => ({ t, valor: saldoTarjeta(t, movs) }))
+    .filter((x) => x.valor > 0)
   // Mercado, transporte…: la mitad del presupuesto en cada quincena; lo ya gastado se descuenta.
   const variables = recs
-    .filter((r) => r.activo && !r.dia)
+    .filter((r) => !r.dia && activoEn(r, p.mes))
     .map((r) => ({ r, queda: Math.max(0, Math.round(r.valor / 2) - suma(gastos.filter((g) => g.categoria === r.categoria && !g.recurrenteId))) }))
   const entraReserva = reservaPrevia?.valor ?? 0
   const separar = p.q === 2 ? (reservaHecha?.valor ?? cfg.reserva) : 0
-  const salio = suma(gastos)
-  const porPagar = pendientes.reduce((t, o) => t + o.r.valor, 0)
+  const salio = suma(gastos.filter(deCuenta))
+  const porPagar = pendientes.reduce((t, o) => t + o.r.valor, 0) + suma(tarjetas)
   const porGastar = variables.reduce((t, v) => t + v.queda, 0)
+  const base = { p, nombre: quincena.nombre, entra, llego, entraReserva, salio, pendientes, tarjetas, porPagar, variables, porGastar, separar, reservaHecha: !!reservaHecha }
+
+  const c = cfg.cuadre
+  if (!c || !hoyF || !igual(p, periodoDeFecha(hoyF)) || orden(periodoDeFecha(c.fecha)) > orden(p))
+    return { ...base, cuadre: null, libre: entra + entraReserva - salio - porPagar - porGastar - separar }
+
+  // Con cuadre: saldo real + lo que entró − lo que salió de la cuenta después. El fondo y la reserva viven en la cuenta
+  // pero no se tocan; la quincena que paga el periodo siguiente todavía no se cuenta.
+  const interno = (m: Movimiento) => m.categoria === 'Fondo de emergencia' || m.tipo === 'reserva'
+  const entradas = movs.filter((m) => m.tipo === 'ingreso' && despuesDe(c, m) && !interno(m) && orden(periodoDeIngreso(m.fecha)) <= orden(p))
+  const salidas = movs.filter((m) => m.tipo === 'gasto' && despuesDe(c, m) && !interno(m) && deCuenta(m))
+  const saldo = c.saldo + suma(entradas) - suma(salidas)
+  // Si el cuadre fue antes de que empezara esta quincena y la quincena no se ha registrado, se espera.
+  const esperada = !llego && orden(periodoDeFecha(c.fecha)) < orden(p) ? quincena.valor : 0
+  const fondo = fondoActual(d)
+  const guardar = p.q === 2 ? cfg.reserva : 0 // en la quincena 1 la reserva se usa para los pagos del 1
   return {
-    p,
-    nombre: quincena.nombre,
-    entra,
-    llego,
-    entraReserva,
-    salio,
-    pendientes,
-    porPagar,
-    variables,
-    porGastar,
-    separar,
-    reservaHecha: !!reservaHecha,
-    libre: entra + entraReserva - salio - porPagar - porGastar - separar,
+    ...base,
+    cuadre: { fecha: c.fecha, saldo, esperada, fondo, guardar },
+    libre: saldo + esperada - fondo - guardar - porPagar - porGastar,
   }
 }
 
@@ -112,10 +159,11 @@ export const GASTOS = ['Mercado', 'Transporte', 'Comida fuera', 'Cuidado persona
 /** Un ingreso en una categoría de gasto (reembolso de iCloud, retiro del fondo) se resta de esa categoría. */
 export function presupuesto(mes: string, d: Datos) {
   const plan = new Map<string, number>()
-  for (const r of d.recs) if (r.activo) plan.set(r.categoria, (plan.get(r.categoria) ?? 0) + (r.miParte ?? r.valor))
+  for (const r of d.recs) if (activoEn(r, mes)) plan.set(r.categoria, (plan.get(r.categoria) ?? 0) + (r.miParte ?? r.valor))
   const real = new Map<string, number>()
   for (const m of d.movs) {
-    if (m.tipo === 'reserva' || INGRESOS.includes(m.categoria) || (m.vence ?? m.fecha).slice(0, 7) !== mes) continue
+    // el pago de la tarjeta es un traslado: los gastos ya se contaron cuando se hizo cada cargo
+    if (m.tipo === 'reserva' || m.categoria === PAGO_TARJETA || INGRESOS.includes(m.categoria) || (m.vence ?? m.fecha).slice(0, 7) !== mes) continue
     real.set(m.categoria, (real.get(m.categoria) ?? 0) + (m.tipo === 'gasto' ? m.valor : -m.valor))
   }
   return [...new Set([...plan.keys(), ...real.keys()])]
@@ -127,6 +175,18 @@ export function presupuesto(mes: string, d: Datos) {
 /** Total neto de una categoría desde siempre (cajitas, fondo de emergencia). */
 export const acumulado = (movs: Movimiento[], categoria: string) =>
   movs.reduce((t, m) => (m.categoria !== categoria || m.tipo === 'reserva' ? t : t + (m.tipo === 'gasto' ? m.valor : -m.valor)), 0)
+
+/** Ahorro que te debes: cajitas que tocaban desde que usas la app hasta hoy menos lo que de verdad aportaste. */
+export function ahorroDebido(d: Datos, hoyF: string) {
+  let esperado = 0
+  for (let mes = d.cfg.inicio.slice(0, 7); mes <= hoyF.slice(0, 7); mes = sumarMeses(mes, 1))
+    for (const o of ocurrencias(d.recs, mes)) if (o.r.categoria === 'Ahorro' && o.vence >= d.cfg.inicio && o.vence <= hoyF) esperado += o.r.valor
+  const aportado = d.movs.reduce(
+    (t, m) => (m.categoria === 'Ahorro' && m.tipo !== 'reserva' && (m.vence ?? m.fecha) >= d.cfg.inicio ? t + (m.tipo === 'gasto' ? m.valor : -m.valor) : t),
+    0,
+  )
+  return Math.max(0, esperado - aportado)
+}
 
 /** Lo que la otra persona debe de un gasto compartido: su parte de cada cobro pagado menos lo que ya devolvió. */
 export function reembolso(r: Recurrente, movs: Movimiento[]) {
