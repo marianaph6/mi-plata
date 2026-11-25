@@ -119,8 +119,6 @@ export function Mas() {
       x.tasaEA == null && `${x.nombre}: tasa`,
       x.cuotasRestantes == null && x.tasaEA == null && `${x.nombre}: cuotas restantes`,
     ]),
-    ...d.recs.filter((r) => r.activo && r.estimado).map((r) => `${r.nombre}: el valor es estimado`),
-    ...d.recs.filter((r) => r.activo && r.enRevision).map((r) => `Decidir si sigues con ${r.nombre}`),
     meta == null && 'Meta del fondo de emergencia',
   ].filter((x): x is string => !!x)
 
@@ -181,7 +179,7 @@ export function Mas() {
         </Seccion>
       )}
 
-      <Seccion titulo="Respaldo y Excel">
+      <Seccion titulo="Respaldo e instalación">
         <p className="text-xs text-suave">Tus datos viven solo en este teléfono: guarda una copia de vez en cuando.</p>
         <div className="mt-2 flex flex-wrap gap-2">
           <button type="button" onClick={async () => guardar(await exportar())} className="rounded-full bg-acento px-4 py-2 font-semibold text-white">Exportar respaldo</button>
@@ -192,10 +190,7 @@ export function Mas() {
           <button type="button" onClick={() => guardar(new File([csv(d)], `mi-plata-${hoy()}.csv`, { type: 'text/csv' }))} className={botonSecundario}>Excel (CSV)</button>
         </div>
         {aviso && <p className="mt-2 text-sm">{aviso}</p>}
-      </Seccion>
-
-      <Seccion titulo="Widget e instalación">
-        <ol className="list-decimal space-y-1 pl-5 text-sm text-suave">
+        <ol className="mt-4 list-decimal space-y-1 pl-5 text-sm text-suave">
           <li>Abre {URL_APP} en Safari → Compartir → <b>Agregar a pantalla de inicio</b>.</li>
           <li>App <b>Atajos</b> → nuevo atajo → acción <b>Abrir URL</b> con <code className="break-all">{URL_APP}#/gasto</code>.</li>
           <li>Mantén presionada la pantalla de inicio → <b>+</b> → <b>Atajos</b> → elige el atajo. Un toque y anotas un gasto.</li>

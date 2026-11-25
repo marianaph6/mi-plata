@@ -17,10 +17,10 @@ function Simulador({ dd, e }: { dd: Deuda; e: ReturnType<typeof estadoDeuda> }) 
     <div>
       <p className="text-xs text-suave">{dd.modoAbono === 'plazo' ? 'Un abono aquí reduce el plazo.' : 'Un abono aquí reduce la cuota.'}</p>
       <input inputMode="numeric" placeholder="$ valor del abono" aria-label="Valor del abono" value={abono ? cop(abono) : ''} onChange={(ev) => setTexto(ev.target.value)} className={`mt-2 ${entrada}`} />
-      {abono > 0 && !s && <p className="mt-2 text-sm text-amber-900">Para simular, completa saldo y tasa en Editar datos.</p>}
+      {abono > 0 && !s && <p className="mt-2 text-sm text-amber-900">Para simular, completa saldo y tasa abajo.</p>}
       {s?.modo === 'plazo' && (
         <div className="mt-2 text-sm">
-          <Fila izq="Cuotas que faltan" der={`${s.cuotasAntes} → ${s.cuotasDespues}`} />
+          {e.restantes != null && isFinite(e.restantes) && <Fila izq="Cuotas que faltan" der={`${e.restantes} → ${e.restantes - (s.cuotasAntes - s.cuotasDespues)}`} />}
           <Fila izq="Terminas antes" der={`${s.cuotasAntes - s.cuotasDespues} meses`} />
           <Fila izq="Te ahorras en intereses" der={<b>{cop(s.interesesAhorrados)}</b>} />
         </div>
@@ -142,11 +142,9 @@ export function Deudas() {
             {e.cuotaNueva && Math.abs(e.cuotaNueva - dd.cuota) > 500 && <p className="mt-1 text-sm">Cuota nueva ≈ {cop(e.cuotaNueva)}</p>}
 
             <details className="mt-2">
-              <summary className="min-h-11 cursor-pointer py-2 text-sm text-suave">Simular abono</summary>
+              <summary className="min-h-11 cursor-pointer py-2 text-sm text-suave">Abonar y detalles</summary>
               <Simulador dd={dd} e={e} />
-            </details>
-            <details>
-              <summary className="min-h-11 cursor-pointer py-2 text-sm text-suave">Historial y datos</summary>
+              <p className="mt-4 text-sm font-semibold">Pagos</p>
               {historial(e.movs)}
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <Campo label="Saldo" valor={dd.saldo} onGuardar={(v) => cambiar(dd, { saldo: v as number | null })} />

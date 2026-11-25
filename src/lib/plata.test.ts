@@ -150,6 +150,13 @@ describe('deudas', () => {
     expect(Math.abs(e2.cuotaNueva! - s.cuotaAntes)).toBeLessThanOrEqual(1)
   })
 
+  it('con cuotas del banco las respeta y un abono solo resta los meses que ahorra', () => {
+    const d: Deuda = { ...base, cuotasRestantes: 15 }
+    expect(estadoDeuda(d, [], '2026-03-02').restantes).toBe(15)
+    const abono = mov({ valor: 200_000, deudaId: 1, abono: true, fecha: '2026-03-02' })
+    expect(estadoDeuda(d, [abono], '2026-03-02').restantes).toBe(13) // 11 → 9 por la tasa
+  })
+
   it('sin saldo ni tasa cuenta cuotas y estima la última', () => {
     const d: Deuda = { ...base, saldo: null, tasaEA: null, cuotasRestantes: 55, saldoFecha: '2026-11-24' }
     const e = estadoDeuda(d, [], '2026-11-24')

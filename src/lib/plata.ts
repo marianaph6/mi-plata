@@ -209,11 +209,20 @@ export function estadoDeuda(dd: Deuda, movs: Movimiento[], hoyF: string) {
   const i = dd.tasaEA == null ? null : tasaMes(dd.tasaEA)
   const cuotasPagadas = ms.filter((m) => !m.abono).length
   let saldo = dd.saldo
+  let sinAbonos = dd.saldo
   // shortcut: intereses de un mes por cada cuota pagada, sin contar días exactos; se corrige al actualizar el saldo con el extracto.
-  if (saldo != null && i != null) for (const m of ms) saldo = m.abono ? saldo - m.valor : saldo * (1 + i) - m.valor
+  if (saldo != null && sinAbonos != null && i != null)
+    for (const m of ms) {
+      saldo = m.abono ? saldo - m.valor : saldo * (1 + i) - m.valor
+      if (!m.abono) sinAbonos = sinAbonos * (1 + i) - m.valor
+    }
   if (saldo != null) saldo = Math.max(0, Math.round(saldo))
   let restantes = dd.cuotasRestantes == null ? null : Math.max(0, dd.cuotasRestantes - cuotasPagadas)
-  if (dd.modoAbono === 'plazo' && saldo != null && i != null) restantes = Math.ceil(plazoPara(saldo, i, dd.cuota) - 1e-9)
+  if (dd.modoAbono === 'plazo' && saldo != null && sinAbonos != null && i != null) {
+    const n = Math.ceil(plazoPara(saldo, i, dd.cuota) - 1e-9)
+    // Las cuotas del banco mandan (la cuota puede traer seguros); los abonos solo restan los meses que ahorran.
+    restantes = restantes == null ? n : Math.max(0, restantes - (Math.ceil(plazoPara(Math.max(0, sinAbonos), i, dd.cuota) - 1e-9) - n))
+  }
   const cuotaNueva = dd.modoAbono === 'cuota' && saldo != null && i != null && restantes ? Math.round(cuotaPara(saldo, i, restantes)) : null
   const mes = hoyF.slice(0, 7)
   // La cuota de este mes ya está contada si vencía antes de la fecha del saldo de referencia.

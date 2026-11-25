@@ -82,7 +82,10 @@ export function Hoy() {
   const llego = d.movs.some((m) => m.tipo === 'ingreso' && m.categoria === 'Quincena' && igual(periodoDeIngreso(m.fecha), pIngreso))
   // Si cuadraste en esta misma quincena, la plata que ya llegó está dentro del saldo: registrarla la contaría dos veces.
   const cuadradaYa = !!d.cfg.cuadre && igual(periodoDeIngreso(d.cfg.cuadre.fecha), pIngreso)
+  // El botón solo aparece cuando la quincena puede llegar (15–20 y 28–5).
+  const cercaDePago = (dia >= 15 && dia <= 20) || dia >= 28 || dia <= 5
   const avisos = proximos(d, f)
+  const MAX = 3
   const tarjetas = d.deudas
     .filter((t) => t.tarjeta)
     .map((t) => ({ t, saldo: saldoTarjeta(t, d.movs), fecha: t.tarjeta!.pagoFecha }))
@@ -116,12 +119,11 @@ export function Hoy() {
       <section className="pt-2">
         <p className="text-sm text-suave">Libre hasta el {hasta(p)}</p>
         <p className={`text-5xl font-bold tracking-tight tabular-nums ${actual.libre < 0 ? 'text-red-700' : ''}`}>{cop(actual.libre)}</p>
-        {actual.libre < 0 && <p className="mt-1 text-sm text-red-700">Te faltan {cop(-actual.libre)} para esta quincena.</p>}
         <Detalle d={d} f={actual} p={p} />
       </section>
 
       <a href="#/gasto" className={`mt-4 block text-center ${botonPrincipal}`}>+ Gasto</a>
-      {!llego && !cuadradaYa && quincena.valor > 0 && !(dia >= 10 && dia < 15) && (
+      {!llego && !cuadradaYa && quincena.valor > 0 && cercaDePago && (
         <a href={`#/gasto?tipo=ingreso&cat=Quincena&valor=${quincena.valor}`} className={`mt-2 block text-center ${botonSecundario}`}>
           Llegó la quincena
         </a>
@@ -140,7 +142,7 @@ export function Hoy() {
               </a>
             </li>
           ))}
-          {avisos.map((o) => (
+          {avisos.slice(0, MAX).map((o) => (
             <li key={o.r.id + o.vence} className="flex min-h-12 items-center gap-3 py-2">
               <button
                 type="button"
@@ -167,6 +169,7 @@ export function Hoy() {
             </li>
           ))}
         </ul>
+        {avisos.length > MAX && <a href="#/pagos" className="block pt-2 text-sm font-semibold text-acento">y {avisos.length - MAX} más esta semana ›</a>}
         {!avisos.length && !tarjetas.length && !cobros.length && <p className="text-sm text-suave">Nada esta semana. 🎉</p>}
       </Tarjeta>
 
